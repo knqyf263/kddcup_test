@@ -20,19 +20,31 @@ from chainer.training import extensions
 import chainer.functions as F
 import chainer.links as L
 
-target = "kdd_relu"
-class_name = re.sub("_(.)",lambda x:x.group(1).upper(), target.capitalize())
+def option():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--batchsize', '-b', type=int, default=10000, help='Number of examples in each mini-batch')
+    parser.add_argument('--epoch', '-e', type=int, default=5, help='Number of sweeps over the dataset to train')
+    parser.add_argument('--resume', '-r', default='', help='Resume the training from snapshot')
+    parser.add_argument('--unit', '-u', type=int, default=650, help='Number of LSTM units in each layer')
+    parser.add_argument('--target', '-t', type=str, default="kdd", help='Target name')
+    return parser.parse_args()
+
+args = option()
+
+# snake => camel (kdd_relu => KddRelu)
+class_name = re.sub("_(.)",lambda x:x.group(1).upper(), args.target.capitalize()) 
 cls = getattr(sys.modules["kdd"], class_name)
 
 # パラメータ設定
 in_units = 41
 hidden_units = 50
 out_units = 5
-model_file = "model/{}/my.model".format(target)
-optimizer_file = "model/{}/my.optimizer".format(target)
+model_file = "model/{}/my.model".format(args.target)
+optimizer_file = "model/{}/my.optimizer".format(args.target)
 
-# 訓練データの準備
-kdd_data = pandas.read_csv("kddcup99/train.csv")
+# データの準備
+kdd_train_data = pandas.read_csv("kddcup99/train.csv")
+kdd_test_data = pandas.read_csv("kddcup99/corrected.csv")
 
 # モデルの準備
 kdd = cls(in_units, hidden_units, out_units)
@@ -55,15 +67,21 @@ if os.path.isfile(optimizer_file):
     print("optimizer load!!")
     serializers.load_npz(optimizer_file, optimizer)
 
-batchsize = 50000
-epoch = 5
-#resume = "result/snapshot_iter_494"
-resume = ""
+batchsize = args.batchsize
+epoch = args.epoch
+resume = args.resume
 
-X = np.asarray(kdd_data.ix[:, :-1], dtype=np.float32)
-Y = np.asarray(kdd_data.ix[:, -1], dtype=np.int32)
-train, test = datasets.split_dataset_random(datasets.TupleDataset(X,Y), len(Y) - 10000)
+# 訓練データの準備
+X = np.asarray(kdd_train_data.ix[:, :-1], dtype=np.float32)
+Y = np.asarray(kdd_train_data.ix[:, -1], dtype=np.int32)
+train = datasets.TupleDataset(X,Y)
 
+# テストデータの準備
+X = np.asarray(kdd_test_data.ix[:, :-1], dtype=np.float32)
+Y = np.asarray(kdd_test_data.ix[:, -1], dtype=np.int32)
+test = datasets.TupleDataset(X,Y)
+
+# Trainerの準備
 train_iter = chainer.iterators.SerialIterator(train, batchsize)
 test_iter = chainer.iterators.SerialIterator(test, batchsize ,repeat=False, shuffle=False)
 
