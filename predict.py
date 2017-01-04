@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/local/bin/python
 #coding:utf-8
 
 from __future__ import print_function
@@ -10,24 +10,13 @@ import numpy as np
 from numpy.random import *
 import six
 import pandas
+from kdd import *
 
 import chainer
 from chainer import optimizers
 from chainer import serializers
 import chainer.functions as F
 import chainer.links as L
-
-class Kdd(chainer.Chain):
-    def __init__(self, in_units, hidden_units, out_units, train=True):
-        super(Kdd, self).__init__(
-            l1=L.Linear(in_units, hidden_units),
-            l2=L.Linear(hidden_units, out_units),
-        )
-
-    def __call__(self, x):
-        h1 = self.l1(x)
-        y = self.l2(h1)
-        return y
 
 # パラメータ設定
 in_units = 41
@@ -43,7 +32,7 @@ kdd = Kdd(in_units, hidden_units, out_units)
 model = L.Classifier(kdd)
 model.compute_accuracy = False
 
-serializers.load_npz('model/my.model', model)
+serializers.load_npz('model/1layer/my.model', model)
 
 x = chainer.Variable(np.asarray(kdd_data.ix[:, :-1], dtype=np.float32))
 #t = chainer.Variable(np.asarray(kdd_data.ix[:, -1], dtype=np.int32))

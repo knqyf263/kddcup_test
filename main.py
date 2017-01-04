@@ -1,75 +1,43 @@
-#!/usr/bin/python
+#!/usr/local/bin/python
 #coding:utf-8
 
 from __future__ import print_function
 import argparse
 import math
-import sys, time, os
+import sys, time, os, re
 
 import numpy as np
 from numpy.random import *
 import six
 import pandas
+from kdd import *
 
 import chainer
 from chainer import optimizers
 from chainer import serializers
+from chainer import training, datasets
+from chainer.training import extensions
 import chainer.functions as F
 import chainer.links as L
 
-class Kdd(chainer.Chain):
-    def __init__(self, in_units, hidden_units, out_units, train=True):
-        super(Kdd, self).__init__(
-            l1=L.Linear(in_units, hidden_units),
-            l2=L.Linear(hidden_units, hidden_units),
-            l3=L.Linear(hidden_units, out_units),
-        )
-
-    def __call__(self, x):
-        h1 = self.l1(x)
-        h2 = self.l2(h1)
-        y = self.l3(h2)
-        return y
-
-def each_slice(arr, n):
-    return [arr[i:i + n] for i in range(0, len(arr), n)]
-
-def compute(kdd_mini_data, seq):
-    start = time.time()
-#    for _,v in kdd_mini_data.iterrows():
-#        x = chainer.Variable(np.asarray([v[:-1]], dtype=np.float32))
-#        t = chainer.Variable(np.asarray([v[-1]], dtype=np.int32))
-#        loss += model(x, t)  # lossの計算
-    x = chainer.Variable(np.asarray(kdd_mini_data.ix[:, :-1], dtype=np.float32))
-    t = chainer.Variable(np.asarray(kdd_mini_data.ix[:, -1], dtype=np.int32))
-    loss = model(x, t)  # lossの計算
-
-    # 最適化の実行
-    model.zerograds()
-    loss.backward()
-    optimizer.update()
-
-    # lossの表示
-    cur_end = time.time()
-    print("sequence:{}, loss:{}, time:{} sec".format(seq, loss.data, (cur_end - start)))
-    serializers.save_npz(model_file, model)
-    serializers.save_npz(optimizer_file, optimizer)
+target = "kdd_relu"
+class_name = re.sub("_(.)",lambda x:x.group(1).upper(), target.capitalize())
+cls = getattr(sys.modules["kdd"], class_name)
 
 # パラメータ設定
 in_units = 41
 hidden_units = 50
 out_units = 5
-model_file = "model/2layer/my.model"
-optimizer_file = "model/2layer/my.optimizer"
+model_file = "model/{}/my.model".format(target)
+optimizer_file = "model/{}/my.optimizer".format(target)
 
 # 訓練データの準備
 kdd_data = pandas.read_csv("kddcup99/train.csv")
 
 # モデルの準備
-kdd = Kdd(in_units, hidden_units, out_units)
-# このようにすることで分類タスクを簡単にかける
+kdd = cls(in_units, hidden_units, out_units)
 model = L.Classifier(kdd)
-model.compute_accuracy = False
+#model.compute_accuracy = False
 
 if os.path.isfile(model_file):
     print("model load!!")
@@ -87,20 +55,34 @@ if os.path.isfile(optimizer_file):
     print("optimizer load!!")
     serializers.load_npz(optimizer_file, optimizer)
 
+batchsize = 50000
+epoch = 5
+#resume = "result/snapshot_iter_494"
+resume = ""
 
-# 訓練を行うループ
-mini_batch = 1000000  # 何回ごとに表示するか
-total_loss = 0  # 誤差関数の値を入れる変数
-loss = 0
-seq = 0
-epoch = 10000
-start = time.time()
-for seq in range(epoch):
-    sampler = np.random.permutation(len(kdd_data))
-    sequence = 0
-    for s in each_slice(sampler, mini_batch):
-        sequence += len(s)
-        compute(kdd_data.take(s), sequence)
+X = np.asarray(kdd_data.ix[:, :-1], dtype=np.float32)
+Y = np.asarray(kdd_data.ix[:, -1], dtype=np.int32)
+train, test = datasets.split_dataset_random(datasets.TupleDataset(X,Y), len(Y) - 10000)
+
+train_iter = chainer.iterators.SerialIterator(train, batchsize)
+test_iter = chainer.iterators.SerialIterator(test, batchsize ,repeat=False, shuffle=False)
+
+updater = training.StandardUpdater(train_iter, optimizer, device=-1)
+trainer = training.Trainer(updater, (epoch, 'epoch'), out="result")
+
+trainer.extend(extensions.Evaluator(test_iter, model))
+trainer.extend(extensions.dump_graph('main/loss'))
+trainer.extend(extensions.snapshot(), trigger=(epoch, 'epoch'))
+trainer.extend(extensions.LogReport())
+trainer.extend(extensions.PrintReport(
+	['epoch', 'main/loss', 'validation/main/loss',
+	'main/accuracy', 'validation/main/accuracy', 'elapsed_time']))
+trainer.extend(extensions.ProgressBar())
+
+if resume:
+    chainer.serializers.load_npz(resume, trainer)
+
+trainer.run()
 
 serializers.save_npz(model_file, model)
 serializers.save_npz(optimizer_file, optimizer)
